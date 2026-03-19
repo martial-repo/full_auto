@@ -98,14 +98,55 @@ jobs:
           echo "$COMMENT" | gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file -
 
       - name: Assign issue to Copilot
-        env:
-          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          # Assign to copilot bot for automated refinement
-          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "app/github-copilot" 2>/dev/null || \
-          echo "Note: Could not assign to github-copilot app directly. Copilot assignment must be done via GitHub UI."
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GHP_TOKEN != '' && secrets.GHP_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.issue.number;
+      
+            let assignmentOk = false;
+            let assignmentError = null;
+      
+            try {
+              await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/assignees', {
+                owner,
+                repo,
+                issue_number,
+                assignees: ['copilot-swe-agent[bot]'],
+                agent_assignment: {
+                  target_repo: `${owner}/${repo}`,
+                  base_branch: 'main',
+                  custom_agent: 'refinement-agent',
+                  custom_instructions: [
+                    'Read .github/agents/refinement-agent.md and follow it strictly.',
+                    'This is a refinement phase.',
+                    'Do not write product code unless the issue is explicitly in execution phase.',
+                    'Rewrite the epic, create sub-issues, define dependencies, and move the epic to phase:ready when finished.'
+                  ].join(' ')
+                }
+              });
+              assignmentOk = true;
+            } catch (error) {
+              core.warning(`Assignment with agent_assignment failed: ${error.message}`);
+              try {
+                await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/assignees', {
+                  owner,
+                  repo,
+                  issue_number,
+                  assignees: ['copilot-swe-agent[bot]']
+                });
+                assignmentOk = true;
+              } catch (fallbackError) {
+                assignmentError = fallbackError.message;
+                core.warning(`Fallback assignment failed: ${fallbackError.message}`);
+              }
+            }
+      
+            if (!assignmentOk) {
+              core.warning(`Copilot assignment failed: ${assignmentError || 'unknown error'}`);
+            }
 
       - name: Sync to Projects – set status to Refinement
         env:

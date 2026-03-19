@@ -1,19 +1,29 @@
 name: 01 – Setup Labels
 
 on:
+  # Auto-runs when the governance scripts are first merged into the default branch.
+  # This means labels are created automatically on merge — no manual trigger needed.
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/scripts/create-labels.sh'
+  # Also available for manual re-runs (e.g. to add new labels later).
   workflow_dispatch:
     inputs:
       confirm:
         description: "Type 'yes' to confirm label initialization (this will modify existing labels)"
-        required: true
-        default: "no"
+        required: false
+        default: "yes"
 
 permissions:
   issues: write
 
 jobs:
   setup-labels:
-    if: github.event.inputs.confirm == 'yes'
+    # For push events always run; for manual dispatch require explicit confirmation
+    if: github.event_name == 'push' || github.event.inputs.confirm == 'yes'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

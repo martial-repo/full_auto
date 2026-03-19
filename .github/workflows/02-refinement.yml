@@ -79,7 +79,7 @@ jobs:
 
           **Epic**: $ISSUE_TITLE (#$ISSUE_NUMBER)
 
-          The Refinement Agent has been assigned to this epic. @github-copilot please refine this epic following the instructions in `.github/agents/refinement-agent.md`.
+          The Refinement Agent @github-copilot has been assigned to this epic.
 
           ### What the Refinement Agent will do:
           1. 📖 Analyze the epic objective, scope, and acceptance criteria
@@ -114,7 +114,19 @@ jobs:
                 owner,
                 repo,
                 issue_number,
-                assignees: ['copilot-swe-agent[bot]']
+                assignees: ['copilot-swe-agent[bot]'],
+                agent_assignment: {
+                  target_repo: `${owner}/${repo}`,
+                  base_branch: 'main',
+                  custom_instructions: [
+                    'Refinement phase only.',
+                    'Do not create or modify repository files.',
+                    'Do not create a branch.',
+                    'Do not open a pull request.',
+                    'Rewrite the epic body clearly.',
+                    'Create sub-issues, define dependencies, and move the epic to phase:ready when refinement is complete.'
+                  ].join(' ')
+                }
               });
               assignmentOk = true;
             } catch (error) {

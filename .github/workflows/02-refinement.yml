@@ -114,7 +114,7 @@ jobs:
                 owner,
                 repo,
                 issue_number,
-                assignees: ['copilot-swe-agent[bot]'],
+                assignees: ['github-copilot[bot]'],
                 agent_assignment: {
                   target_repo: `${owner}/${repo}`,
                   base_branch: 'main',
@@ -135,7 +135,7 @@ jobs:
                   owner,
                   repo,
                   issue_number,
-                  assignees: ['copilot-swe-agent[bot]']
+                  assignees: ['github-copilot[bot]']
                 });
                 assignmentOk = true;
               } catch (fallbackError) {

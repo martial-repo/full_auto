@@ -95,5 +95,68 @@ create_or_update_label "agent:execution"    "FF7619" "Assigned to Execution Agen
 create_or_update_label "agent:qa"           "E4E669" "Under QA Agent review"
 create_or_update_label "agent:release"      "D4C5F9" "Under Release Agent control"
 
+
+# ──────────────────────────────────────────────────────────────
+# CLEANUP: Remove legacy / unrecognised labels
+# ──────────────────────────────────────────────────────────────
+echo ""
+echo "=== Cleaning up legacy labels ==="
+
+# Full list of labels that must be kept (must match every create_or_update_label call above)
+REQUIRED_LABELS=(
+  "phase:draft"
+  "phase:refinement"
+  "phase:ready"
+  "phase:todo"
+  "phase:in-progress"
+  "phase:qa"
+  "phase:release"
+  "phase:done"
+  "type:epic"
+  "type:sub-issue"
+  "type:bug"
+  "type:chore"
+  "type:docs"
+  "type:spike"
+  "priority:critical"
+  "priority:high"
+  "priority:medium"
+  "priority:low"
+  "complexity:xs"
+  "complexity:s"
+  "complexity:m"
+  "complexity:l"
+  "complexity:xl"
+  "status:blocked"
+  "status:needs-info"
+  "status:on-hold"
+  "status:wontfix"
+  "agent:refinement"
+  "agent:execution"
+  "agent:qa"
+  "agent:release"
+)
+
+# Fetch all labels currently in the repository (high limit to avoid pagination gaps)
+EXISTING_LABELS=$(gh label list --repo "$REPO" --json name --jq '.[].name' --limit 1000)
+
+while IFS= read -r label; do
+  [ -z "$label" ] && continue
+
+  is_required=false
+  for required in "${REQUIRED_LABELS[@]}"; do
+    if [ "$label" = "$required" ]; then
+      is_required=true
+      break
+    fi
+  done
+
+  if [ "$is_required" = "false" ]; then
+    gh label delete "$label" --repo "$REPO" --yes 2>/dev/null && \
+      echo "  ✗ Deleted legacy label: $label" || \
+      echo "  ⚠ Could not delete: $label"
+  fi
+done <<< "$EXISTING_LABELS"
+
 echo ""
 echo "✅ Label setup complete for $REPO"

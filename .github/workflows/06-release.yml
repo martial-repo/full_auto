@@ -1,0 +1,94 @@
+name: 06 – Release Pipeline
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-on-merge:
+    # Only trigger when PR is merged (not just closed)
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract linked issue
+        id: extract-issue
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          ISSUE_NUMBER=$(echo "$PR_BODY" | grep -oP '(?i)(closes|fixes|resolves)\s+#\K[0-9]+' | head -1)
+          if [ -n "$ISSUE_NUMBER" ]; then
+            echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "has_issue=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_issue=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mark sub-issue as done
+        if: steps.extract-issue.outputs.has_issue == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.extract-issue.outputs.issue_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Get current labels
+          LABELS=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null || echo "")
+
+          if echo "$LABELS" | grep -q "type:sub-issue"; then
+            # Update sub-issue labels
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" \
+              --add-label "phase:done" \
+              --remove-label "phase:qa" \
+              --remove-label "phase:in-progress" \
+              --remove-label "phase:release" 2>/dev/null || true
+
+            # Close the sub-issue
+            gh issue close "$ISSUE_NUMBER" --repo "$REPO" \
+              --comment "## ✅ AUTOMATED STEP COMPLETE – Released
+
+            This sub-issue has been implemented and merged via PR #$PR_NUMBER.
+
+            **Status**: Done ✅" 2>/dev/null || true
+
+            echo "Sub-issue #$ISSUE_NUMBER marked as done"
+
+            # Check if parent epic can be closed
+            bash .github/scripts/check-epic-completion.sh "$ISSUE_NUMBER" || true
+
+            # Sync to Projects
+            bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "Done" || true
+
+            # Activate next unblocked sub-issues
+            PARENT_EPIC=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json body --jq '.body' | \
+              grep -oP '(?i)part of\s+#\K[0-9]+' | head -1)
+            if [ -n "$PARENT_EPIC" ]; then
+              bash .github/scripts/activate-sub-issues.sh "$PARENT_EPIC" || true
+            fi
+          elif echo "$LABELS" | grep -q "type:epic"; then
+            # Epic PR merged – mark epic as done
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" \
+              --add-label "phase:done" \
+              --remove-label "phase:release" 2>/dev/null || true
+            gh issue close "$ISSUE_NUMBER" --repo "$REPO" 2>/dev/null || true
+            bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "Done" || true
+          fi
+
+      - name: Delete feature branch
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Only delete feature/fix branches, not main/develop
+          if echo "$BRANCH_NAME" | grep -qE "^(feature|fix|chore|epic|docs|refactor)/"; then
+            git push origin --delete "$BRANCH_NAME" 2>/dev/null || \
+            echo "Branch $BRANCH_NAME already deleted or not found"
+          fi

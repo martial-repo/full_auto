@@ -1,0 +1,143 @@
+name: 03 – Execution Pipeline
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Guard: only trigger on phase:todo label on sub-issues
+  # ──────────────────────────────────────────────────────────────
+  check-trigger:
+    if: github.event.label.name == 'phase:todo'
+    runs-on: ubuntu-latest
+    outputs:
+      is_sub_issue: ${{ steps.check.outputs.is_sub_issue }}
+      is_epic: ${{ steps.check.outputs.is_epic }}
+      issue_labels: ${{ steps.check.outputs.issue_labels }}
+    steps:
+      - name: Check issue type
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          LABELS=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')
+          echo "Labels: $LABELS"
+          echo "issue_labels=$LABELS" >> "$GITHUB_OUTPUT"
+
+          if echo "$LABELS" | grep -q "type:sub-issue"; then
+            echo "is_sub_issue=true" >> "$GITHUB_OUTPUT"
+            echo "is_epic=false" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q "type:epic"; then
+            echo "is_sub_issue=false" >> "$GITHUB_OUTPUT"
+            echo "is_epic=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_sub_issue=false" >> "$GITHUB_OUTPUT"
+            echo "is_epic=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ──────────────────────────────────────────────────────────────
+  # Epic goes to Todo – activate all unblocked sub-issues
+  # ──────────────────────────────────────────────────────────────
+  activate-epic-execution:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.is_epic == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find and activate unblocked sub-issues
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/activate-sub-issues.sh "$ISSUE_NUMBER"
+
+      - name: Sync epic to Projects – set status to In Progress
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "In Progress" || \
+          echo "Projects sync skipped"
+
+      - name: Post execution start comment on epic
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "## ✅ AUTOMATED STEP COMPLETE – Execution Started
+
+          The epic has been moved to **Todo**. The Execution Agent is now activating unblocked sub-issues.
+
+          Sub-issues without blocking dependencies have been assigned to Copilot for execution.
+          Sub-issues with unresolved dependencies will be activated automatically as their blockers are completed.
+
+          Monitor progress via the Projects board."
+
+  # ──────────────────────────────────────────────────────────────
+  # Sub-issue goes to Todo – assign to Copilot for execution
+  # ──────────────────────────────────────────────────────────────
+  execute-sub-issue:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.is_sub_issue == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check dependencies are satisfied
+        id: dep-check
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/check-dependencies.sh "$ISSUE_NUMBER"
+
+      - name: Assign to Copilot for execution
+        if: steps.dep-check.outputs.blocked == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Apply in-progress label
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" \
+            --add-label "phase:in-progress" \
+            --remove-label "phase:todo"
+
+          # Post execution comment
+          ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json title --jq '.title')
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "## ✅ AUTOMATED STEP COMPLETE – Execution Assigned
+
+          Sub-issue **#$ISSUE_NUMBER: $ISSUE_TITLE** has been assigned to the Copilot Execution Agent.
+
+          @github-copilot please implement this sub-issue following the instructions in \`.github/agents/execution-agent.md\`.
+
+          **Expected output**: A PR implementing the acceptance criteria listed in this issue."
+
+          # Assign to Copilot
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "app/github-copilot" 2>/dev/null || \
+          echo "Note: Copilot app assignment not available via CLI. Use GitHub UI to assign."
+
+      - name: Sync to Projects – set status to In Progress
+        if: steps.dep-check.outputs.blocked == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "In Progress" || \
+          echo "Projects sync skipped"

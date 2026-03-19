@@ -1,0 +1,117 @@
+name: 02 – Refinement Pipeline
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Guard: only trigger on phase:refinement label on epic issues
+  # ──────────────────────────────────────────────────────────────
+  check-trigger:
+    if: github.event.label.name == 'phase:refinement'
+    runs-on: ubuntu-latest
+    outputs:
+      is_epic: ${{ steps.check.outputs.is_epic }}
+    steps:
+      - name: Check issue type
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          LABELS=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')
+          echo "Labels: $LABELS"
+          if echo "$LABELS" | grep -q "type:epic"; then
+            echo "is_epic=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_epic=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ──────────────────────────────────────────────────────────────
+  # Block refinement on non-epics
+  # ──────────────────────────────────────────────────────────────
+  guard-non-epic:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.is_epic == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment and remove label
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "## ⚠️ Guard Rail – Refinement Blocked
+
+          The \`phase:refinement\` label can only be applied to issues with the \`type:epic\` label.
+
+          **Action**: Please remove \`phase:refinement\` and ensure this issue has \`type:epic\` before retrying."
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --remove-label "phase:refinement"
+
+  # ──────────────────────────────────────────────────────────────
+  # Assign Copilot for refinement
+  # ──────────────────────────────────────────────────────────────
+  assign-copilot-refinement:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.is_epic == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post refinement initiation comment
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          ISSUE_BODY=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json body --jq '.body')
+          ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json title --jq '.title')
+
+          cat > /tmp/refinement-comment.md << 'COMMENT_EOF'
+          ## 🤖 Refinement Agent – Activated
+
+          **Epic**: $ISSUE_TITLE (#$ISSUE_NUMBER)
+
+          The Refinement Agent has been assigned to this epic. @github-copilot please refine this epic following the instructions in `.github/agents/refinement-agent.md`.
+
+          ### What the Refinement Agent will do:
+          1. 📖 Analyze the epic objective, scope, and acceptance criteria
+          2. ✍️ Rewrite the epic body with a complete structured format
+          3. 🔀 Decompose the epic into sub-issues
+          4. 🗺️ Define dependencies between sub-issues
+          5. 📊 Set priorities and execution order
+          6. ✅ Move the epic to `phase:ready` when complete
+
+          ---
+          *Refinement in progress. Do not modify this issue until the agent posts the refinement summary.*
+          COMMENT_EOF
+
+          # Substitute variables
+          COMMENT=$(sed "s|\$ISSUE_TITLE|$ISSUE_TITLE|g; s|\$ISSUE_NUMBER|$ISSUE_NUMBER|g" /tmp/refinement-comment.md)
+          echo "$COMMENT" | gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file -
+
+      - name: Assign issue to Copilot
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Assign to copilot bot for automated refinement
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "app/github-copilot" 2>/dev/null || \
+          echo "Note: Could not assign to github-copilot app directly. Copilot assignment must be done via GitHub UI."
+
+      - name: Sync to Projects – set status to Refinement
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "Refinement" || \
+          echo "Projects sync skipped – configure PROJECT_NUMBER in repository variables"

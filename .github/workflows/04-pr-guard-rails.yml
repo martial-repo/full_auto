@@ -1,0 +1,196 @@
+name: 04 – PR Guard Rails
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Guard: Verify PR is linked to a valid in-progress sub-issue.
+  # Only enforced for governance branches (feature/, fix/, chore/,
+  # epic/, docs/, refactor/). Other branches (e.g. copilot/, main)
+  # bypass this check so infrastructure PRs are never rejected.
+  # ──────────────────────────────────────────────────────────────
+  pr-guard:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if branch requires governance guard
+        id: branch-check
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Only enforce linked-issue guard on governed branch types
+          if echo "$BRANCH_NAME" | grep -qE "^(feature|fix|chore|epic|docs|refactor)/"; then
+            echo "governed=true" >> "$GITHUB_OUTPUT"
+            echo "Branch '$BRANCH_NAME' is a governed branch – guard rails active."
+          else
+            echo "governed=false" >> "$GITHUB_OUTPUT"
+            echo "Branch '$BRANCH_NAME' is not a governed branch – guard rails skipped."
+          fi
+
+      - name: Extract linked issue number
+        id: extract-issue
+        if: steps.branch-check.outputs.governed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Extract issue number from PR body (looks for "Closes #NNN" or "Part of #NNN")
+          ISSUE_NUMBER=$(echo "$PR_BODY" | grep -oP '(?i)(closes|fixes|resolves)\s+#\K[0-9]+' | head -1)
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "linked_issue=" >> "$GITHUB_OUTPUT"
+            echo "has_linked_issue=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "linked_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "has_linked_issue=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail if no linked issue
+        if: steps.branch-check.outputs.governed == 'true' && steps.extract-issue.outputs.has_linked_issue == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## ⚠️ Guard Rail – PR Rejected
+
+          This PR does not have a linked issue. All PRs must be linked to a sub-issue with \`Closes #<issue-number>\` in the PR body.
+
+          **Action**: Update the PR body to include the linked issue reference, then push again."
+          exit 1
+
+      - name: Check linked issue has correct phase label
+        if: steps.branch-check.outputs.governed == 'true' && steps.extract-issue.outputs.has_linked_issue == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ steps.extract-issue.outputs.linked_issue }}
+          REPO: ${{ github.repository }}
+        run: |
+          LABELS=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null || echo "not-found")
+
+          if [ "$LABELS" = "not-found" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## ⚠️ Guard Rail – Linked Issue Not Found
+
+            The PR body references issue #$ISSUE_NUMBER but this issue does not exist.
+
+            **Action**: Fix the issue reference in the PR body."
+            exit 1
+          fi
+
+          # Check that the issue is in a valid execution phase
+          if ! echo "$LABELS" | grep -qE "phase:(in-progress|qa|todo)"; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## ⚠️ Guard Rail – PR Created Too Early
+
+            PR #$PR_NUMBER is linked to issue #$ISSUE_NUMBER, but that issue has labels: \`$LABELS\`
+
+            A PR should only be created for issues in \`phase:in-progress\` or \`phase:todo\`.
+            Creating PRs for issues in \`phase:draft\`, \`phase:refinement\`, or \`phase:ready\` is not allowed.
+
+            **Action**: Ensure the issue is properly in the execution phase before opening a PR."
+            exit 1
+          fi
+
+          echo "✅ Issue #$ISSUE_NUMBER is in a valid execution phase. PR guard passed."
+
+      - name: Verify branch naming convention
+        if: steps.branch-check.outputs.governed == 'true'
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Valid patterns: feature/N-slug, fix/N-slug, chore/N-slug, epic/N-slug, docs/N-slug
+          if ! echo "$BRANCH_NAME" | grep -qE "^(feature|fix|chore|epic|docs|refactor)/[0-9]+-[a-z0-9-]+$"; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## ⚠️ Guard Rail – Branch Naming Convention Violation
+
+            Branch \`$BRANCH_NAME\` does not follow the naming convention.
+
+            **Expected pattern**: \`<type>/<issue-number>-<short-slug>\`
+            **Examples**: \`feature/42-user-auth\`, \`fix/55-login-crash\`, \`chore/60-update-deps\`
+
+            **Action**: Rename your branch to follow the convention. This is a warning — the PR will still be processed, but please fix the branch name." || true
+            # Warning only – don't block the PR for branch naming
+          fi
+
+  # ──────────────────────────────────────────────────────────────
+  # QA Agent: Post QA checklist when PR is ready for review
+  # ──────────────────────────────────────────────────────────────
+  qa-agent:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'ready_for_review' &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post QA checklist
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/post-qa-checklist.sh "$PR_NUMBER"
+
+      - name: Apply phase:qa label to PR
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "phase:qa" 2>/dev/null || true
+
+  # ──────────────────────────────────────────────────────────────
+  # Handle PR review decisions
+  # ──────────────────────────────────────────────────────────────
+  handle-review-decision:
+    if: github.event_name == 'pull_request_review'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Handle changes requested
+        if: github.event.review.state == 'changes_requested'
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Extract linked issue
+          ISSUE_NUMBER=$(echo "$PR_BODY" | grep -oP '(?i)(closes|fixes|resolves)\s+#\K[0-9]+' | head -1)
+
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" \
+              --add-label "phase:in-progress" \
+              --remove-label "phase:qa" 2>/dev/null || true
+
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "## 🔴 HUMAN ACTION REQUIRED – Changes Requested on PR
+
+            PR #$PR_NUMBER has changes requested by the reviewer.
+
+            **Action**: The sub-issue has been moved back to \`phase:in-progress\`. Copilot will address the requested changes and update the PR."
+          fi
+
+          gh pr edit "$PR_NUMBER" --repo "$REPO" \
+            --remove-label "phase:qa" 2>/dev/null || true

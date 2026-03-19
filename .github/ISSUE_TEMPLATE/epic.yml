@@ -1,0 +1,103 @@
+name: 🚀 Epic
+description: Create a high-level epic / major feature chantier. This will be refined by the Copilot Refinement Agent.
+title: "[EPIC] "
+labels:
+  - "type:epic"
+  - "phase:draft"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 📝 New Epic
+        Fill in the information below. This is the **draft** stage — don't worry about being perfect.
+        The Copilot Refinement Agent will transform this into a fully structured epic once you move it to **Refinement** in the Projects board.
+
+  - type: input
+    id: objective
+    attributes:
+      label: 🎯 Objective
+      description: What is the main goal of this epic? (1-2 sentences)
+      placeholder: "e.g. Enable users to authenticate via OAuth 2.0 providers"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 📋 Context & Business Justification
+      description: Why is this epic needed? What problem does it solve?
+      placeholder: |
+        - Current situation: ...
+        - Problem: ...
+        - Expected outcome: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 📐 Scope (Initial)
+      description: What is roughly in scope? What is out of scope?
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: ✅ Acceptance Criteria (Initial)
+      description: How will we know this epic is done?
+      placeholder: |
+        - [ ] Users can log in via GitHub OAuth
+        - [ ] Users can log in via Google OAuth
+        - [ ] Session is persisted across page reloads
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 🏷️ Priority
+      options:
+        - "Critical"
+        - "High"
+        - "Medium"
+        - "Low"
+      default: 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 🔗 Known Dependencies
+      description: Are there other epics, external services, or teams this depends on?
+      placeholder: "e.g. Depends on Epic #5 (API setup), requires SendGrid account"
+    validations:
+      required: false
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: ⚠️ Known Risks or Unknowns
+      description: What could go wrong? What do you not know yet?
+      placeholder: |
+        - OAuth callback URL configuration may differ between environments
+        - Not sure about session storage strategy
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### ⏭️ Next Step
+        After creating this epic:
+        1. Add it to the **Projects board** (it will appear as **Draft**)
+        2. When you're ready for the Copilot agent to refine it, move it to **Refinement** in the board
+        3. The refinement agent will create sub-issues, define dependencies, and move it to **Ready**

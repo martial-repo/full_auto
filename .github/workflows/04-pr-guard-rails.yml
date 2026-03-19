@@ -13,7 +13,10 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────────────────────
-  # Guard: Verify PR is linked to a valid in-progress sub-issue
+  # Guard: Verify PR is linked to a valid in-progress sub-issue.
+  # Only enforced for governance branches (feature/, fix/, chore/,
+  # epic/, docs/, refactor/). Other branches (e.g. copilot/, main)
+  # bypass this check so infrastructure PRs are never rejected.
   # ──────────────────────────────────────────────────────────────
   pr-guard:
     if: github.event_name == 'pull_request'
@@ -22,8 +25,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check if branch requires governance guard
+        id: branch-check
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Only enforce linked-issue guard on governed branch types
+          if echo "$BRANCH_NAME" | grep -qE "^(feature|fix|chore|epic|docs|refactor)/"; then
+            echo "governed=true" >> "$GITHUB_OUTPUT"
+            echo "Branch '$BRANCH_NAME' is a governed branch – guard rails active."
+          else
+            echo "governed=false" >> "$GITHUB_OUTPUT"
+            echo "Branch '$BRANCH_NAME' is not a governed branch – guard rails skipped."
+          fi
+
       - name: Extract linked issue number
         id: extract-issue
+        if: steps.branch-check.outputs.governed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GHP_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -42,7 +60,7 @@ jobs:
           fi
 
       - name: Fail if no linked issue
-        if: steps.extract-issue.outputs.has_linked_issue == 'false'
+        if: steps.branch-check.outputs.governed == 'true' && steps.extract-issue.outputs.has_linked_issue == 'false'
         env:
           GH_TOKEN: ${{ secrets.GHP_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -56,7 +74,7 @@ jobs:
           exit 1
 
       - name: Check linked issue has correct phase label
-        if: steps.extract-issue.outputs.has_linked_issue == 'true'
+        if: steps.branch-check.outputs.governed == 'true' && steps.extract-issue.outputs.has_linked_issue == 'true'
         env:
           GH_TOKEN: ${{ secrets.GHP_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -90,6 +108,7 @@ jobs:
           echo "✅ Issue #$ISSUE_NUMBER is in a valid execution phase. PR guard passed."
 
       - name: Verify branch naming convention
+        if: steps.branch-check.outputs.governed == 'true'
         env:
           BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
           GH_TOKEN: ${{ secrets.GHP_TOKEN }}

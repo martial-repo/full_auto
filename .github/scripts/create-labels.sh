@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # create-labels.sh
 # Creates or updates all governance labels for the full_auto repository.
+# Also removes legacy GitHub default labels that are not used in this project.
 # Usage: GH_TOKEN=<token> REPO=<owner/repo> bash create-labels.sh
 
 set -euo pipefail
@@ -25,6 +26,19 @@ create_or_update_label() {
     gh label create "$name" --repo "$REPO" \
       --color "$color" \
       --description "$description" 2>/dev/null && echo "  ✓ Created: $name" || echo "  ⚠ Could not create: $name"
+  fi
+}
+
+# ──────────────────────────────────────────────────────────────
+# Helper: delete a legacy label if it exists
+# ──────────────────────────────────────────────────────────────
+delete_legacy_label() {
+  local name="$1"
+
+  if gh label list --repo "$REPO" --json name --jq '.[].name' | grep -qx "$name"; then
+    gh label delete "$name" --repo "$REPO" --yes 2>/dev/null && echo "  🗑 Deleted: $name" || echo "  ⚠ Could not delete: $name"
+  else
+    echo "  – Not found (skipping): $name"
   fi
 }
 
@@ -94,6 +108,21 @@ create_or_update_label "agent:refinement"   "BFD4F2" "Assigned to Refinement Age
 create_or_update_label "agent:execution"    "FF7619" "Assigned to Execution Agent"
 create_or_update_label "agent:qa"           "E4E669" "Under QA Agent review"
 create_or_update_label "agent:release"      "D4C5F9" "Under Release Agent control"
+
+# ──────────────────────────────────────────────────────────────
+# Remove legacy GitHub default labels not used in this project
+# ──────────────────────────────────────────────────────────────
+echo ""
+echo "=== Removing Legacy Labels ==="
+delete_legacy_label "bug"
+delete_legacy_label "documentation"
+delete_legacy_label "duplicate"
+delete_legacy_label "enhancement"
+delete_legacy_label "good first issue"
+delete_legacy_label "help wanted"
+delete_legacy_label "invalid"
+delete_legacy_label "question"
+delete_legacy_label "wontfix"
 
 echo ""
 echo "✅ Label setup complete for $REPO"

@@ -114,34 +114,12 @@ jobs:
                 owner,
                 repo,
                 issue_number,
-                assignees: ['copilot-swe-agent[bot]'],
-                agent_assignment: {
-                  target_repo: `${owner}/${repo}`,
-                  base_branch: 'main',
-                  custom_agent: 'refinement-agent',
-                  custom_instructions: [
-                    'Read .github/agents/refinement-agent.md and follow it strictly.',
-                    'This is a refinement phase.',
-                    'Do not write product code unless the issue is explicitly in execution phase.',
-                    'Rewrite the epic, create sub-issues, define dependencies, and move the epic to phase:ready when finished.'
-                  ].join(' ')
-                }
+                assignees: ['copilot-swe-agent[bot]']
               });
               assignmentOk = true;
             } catch (error) {
-              core.warning(`Assignment with agent_assignment failed: ${error.message}`);
-              try {
-                await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/assignees', {
-                  owner,
-                  repo,
-                  issue_number,
-                  assignees: ['copilot-swe-agent[bot]']
-                });
-                assignmentOk = true;
-              } catch (fallbackError) {
-                assignmentError = fallbackError.message;
-                core.warning(`Fallback assignment failed: ${fallbackError.message}`);
-              }
+              assignmentError = error.message;
+              core.warning(`Copilot assignment failed: ${error.message}`);
             }
       
             if (!assignmentOk) {

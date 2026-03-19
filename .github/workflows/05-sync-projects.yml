@@ -1,0 +1,86 @@
+name: 05 – Sync to Projects
+
+on:
+  issues:
+    types: [labeled, unlabeled, closed, reopened]
+  pull_request:
+    types: [opened, closed, labeled]
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  sync-issue-to-project:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine target Projects status
+        id: determine-status
+        env:
+          LABELS_JSON: ${{ toJson(github.event.issue.labels) }}
+        run: |
+          # Map phase labels to Projects board columns
+          LABELS=$(echo "$LABELS_JSON" | jq -r '[.[].name] | join(",")')
+          echo "Current labels: $LABELS"
+
+          STATUS="Backlog"
+
+          if echo "$LABELS" | grep -q "phase:done"; then
+            STATUS="Done"
+          elif echo "$LABELS" | grep -q "phase:release"; then
+            STATUS="Release"
+          elif echo "$LABELS" | grep -q "phase:qa"; then
+            STATUS="QA"
+          elif echo "$LABELS" | grep -q "phase:in-progress"; then
+            STATUS="In Progress"
+          elif echo "$LABELS" | grep -q "phase:todo"; then
+            STATUS="Todo"
+          elif echo "$LABELS" | grep -q "phase:ready"; then
+            STATUS="Ready"
+          elif echo "$LABELS" | grep -q "phase:refinement"; then
+            STATUS="Refinement"
+          elif echo "$LABELS" | grep -q "phase:draft"; then
+            STATUS="Backlog"
+          fi
+
+          echo "target_status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "Syncing to status: $STATUS"
+
+      - name: Sync issue to Projects board
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TARGET_STATUS: ${{ steps.determine-status.outputs.target_status }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "$TARGET_STATUS" || \
+          echo "Projects sync skipped – ensure PROJECT_NUMBER is set in repository variables"
+
+  sync-pr-to-project:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sync PR linked issue to Projects
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          ISSUE_NUMBER=$(echo "$PR_BODY" | grep -oP '(?i)(closes|fixes|resolves)\s+#\K[0-9]+' | head -1)
+
+          if [ -n "$ISSUE_NUMBER" ]; then
+            if [ "${{ github.event.pull_request.merged }}" = "true" ]; then
+              bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "Done" || true
+            elif [ "${{ github.event.action }}" = "opened" ]; then
+              bash .github/scripts/sync-to-project.sh "$ISSUE_NUMBER" "QA" || true
+            fi
+          fi

@@ -1,0 +1,26 @@
+name: 01 – Setup Labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'yes' to confirm label initialization (this will modify existing labels)"
+        required: true
+        default: "no"
+
+permissions:
+  issues: write
+
+jobs:
+  setup-labels:
+    if: github.event.inputs.confirm == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create / Update Labels
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: bash .github/scripts/create-labels.sh

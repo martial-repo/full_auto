@@ -1,0 +1,95 @@
+name: 📋 Sub-issue
+description: Create a sub-issue linked to a parent epic. Normally created by the Refinement Agent — use only if creating manually.
+title: "[EPIC-] "
+labels:
+  - "type:sub-issue"
+  - "phase:draft"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 📋 Sub-issue
+        Sub-issues are normally created automatically by the **Copilot Refinement Agent** during epic refinement.
+        Only use this template if you are manually creating a sub-issue.
+
+  - type: input
+    id: parent_epic
+    attributes:
+      label: 🔗 Parent Epic
+      description: Which epic does this sub-issue belong to? (use #number)
+      placeholder: "Part of #10"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 📝 Description
+      description: What needs to be done? Be specific and actionable.
+      placeholder: |
+        Implement the GitHub OAuth callback endpoint that:
+        - Receives the authorization code
+        - Exchanges it for an access token
+        - Creates or updates the user record
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: ✅ Acceptance Criteria
+      description: How will we know this sub-issue is done?
+      placeholder: |
+        - [ ] GET /auth/github/callback endpoint exists and works
+        - [ ] Returns 200 with user data on success
+        - [ ] Returns 401 on invalid code
+        - [ ] Unit tests cover success and error paths
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 🏷️ Priority
+      options:
+        - "Critical"
+        - "High"
+        - "Medium"
+        - "Low"
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: 📊 Complexity
+      options:
+        - "XS (< 2h)"
+        - "S (2-4h)"
+        - "M (4-8h)"
+        - "L (1-2 days)"
+        - "XL (> 2 days)"
+      default: 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 🔗 Dependencies
+      description: Which other sub-issues must be done before this one?
+      placeholder: |
+        Blocked by: #11, #12
+        Blocks: #15
+    validations:
+      required: false
+
+  - type: textarea
+    id: technical_notes
+    attributes:
+      label: 🔧 Technical Notes
+      description: Any technical details, constraints, or approach suggestions?
+      placeholder: "Use the existing OAuth library, follow the pattern in auth/providers/"
+    validations:
+      required: false
